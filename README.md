@@ -48,5 +48,16 @@ make REGISTRY=ghcr.io REGISTRY_USERNAME=<username> overlay
 make REGISTRY=ghcr.io REGISTRY_USERNAME=<username> installer
 ```
 
+### Cross compiling
+
+When building on amd64 host to arm64 target, we can set `CROSS_COMPILE=true` and it will work for all the steps above, except `installer`.
+
+For generating the final image, we are running an `arm64` container, so we need to have [`binfmt_misc`](https://en.wikipedia.org/wiki/Binfmt_misc) on the host.
+If it isn't enabled, please run
+
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install all
+```
+
 ## License
 See [LICENSE](LICENSE).
