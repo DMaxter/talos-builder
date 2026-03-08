@@ -1,0 +1,166 @@
+From 18ff844098b2e605028194cf0516362a719c6c98 Mon Sep 17 00:00:00 2001
+From: DMaxter <daniel_matos@outlook.pt>
+Date: Sun, 8 Mar 2026 20:39:55 +0000
+Subject: [PATCH 1/1] feat: support for kernel cross compilation
+
+Takes advantage of musl-cc (on the latest version available - 11.2.1)
+If the CROSS_COMPILE variable is set to true, triggers the compilation using the musl cross compiler, instead of relying on binfmt_misc which takes a very long time to achieve the same result. If the variable is not set, the default behavior is preserved. The `--platform` flag was removed as by default docker is already grabbing the correct platform if building on arm64 and if building on amd64 it will fail or fallback to binfmt_misc
+---
+ Makefile                 |  4 +++-
+ cross-toolchain/pkg.yaml | 18 +++++++++++++++++
+ kernel/build/pkg.yaml    | 43 ++++++++++++++++++++++++++++++----------
+ kernel/kernel/pkg.yaml   |  2 +-
+ 4 files changed, 55 insertions(+), 12 deletions(-)
+ create mode 100644 cross-toolchain/pkg.yaml
+
+diff --git a/Makefile b/Makefile
+index 9acad83..4736f74 100644
+--- a/Makefile
++++ b/Makefile
+@@ -17,6 +17,7 @@ USERNAME ?= siderolabs
+ REGISTRY_AND_USERNAME ?= $(REGISTRY)/$(USERNAME)
+ KRES_IMAGE ?= ghcr.io/siderolabs/kres:latest
+ CONFORMANCE_IMAGE ?= ghcr.io/siderolabs/conform:latest
++CROSS_COMPILE ?= false
+ 
+ # source date epoch of first commit
+ 
+@@ -39,8 +40,8 @@ CI_ARGS ?=
+ COMMON_ARGS = --file=Pkgfile
+ COMMON_ARGS += --provenance=false
+ COMMON_ARGS += --progress=$(PROGRESS)
+-COMMON_ARGS += --platform=$(PLATFORM)
+ COMMON_ARGS += --build-arg=SOURCE_DATE_EPOCH=$(SOURCE_DATE_EPOCH)
++COMMON_ARGS += --build-arg=CROSS_COMPILE=$(CROSS_COMPILE)
+ 
+ # targets defines all the available targets
+ 
+@@ -49,6 +50,7 @@ TARGETS += ca-certificates
+ TARGETS += cni
+ TARGETS += containerd
+ TARGETS += cpio
++TARGETS += cross-toolchain
+ TARGETS += cryptsetup
+ TARGETS += dosfstools
+ TARGETS += e2fsprogs
+diff --git a/cross-toolchain/pkg.yaml b/cross-toolchain/pkg.yaml
+new file mode 100644
+index 0000000..04b7d75
+--- /dev/null
++++ b/cross-toolchain/pkg.yaml
+@@ -0,0 +1,18 @@
++name: cross-toolchain
++variant: scratch
++shell: /bin/bash
++dependencies:
++  - stage: base
++steps:
++  - sources:
++      - url: https://musl.cc/aarch64-linux-musl-cross.tgz
++        destination: toolchain.tar.gz
++        sha256: c909817856d6ceda86aa510894fa3527eac7989f0ef6e87b5721c58737a06c38
++        sha512: 8695ff86979cdf30fbbcd33061711f5b1ebc3c48a87822b9ca56cde6d3a22abd4dab30fdcd1789ac27c6febbaeb9e5bde59d79d66552fae53d54cc1377a19272
++    prepare:
++      - |
++        mkdir -p /opt/cross-toolchain
++        tar -xf toolchain.tar.gz --strip-components=1 -C /opt/cross-toolchain
++finalize:
++  - from: /opt/cross-toolchain
++    to: /opt/cross-toolchain
+diff --git a/kernel/build/pkg.yaml b/kernel/build/pkg.yaml
+index f797dd4..6c8dae8 100644
+--- a/kernel/build/pkg.yaml
++++ b/kernel/build/pkg.yaml
+@@ -2,11 +2,13 @@ name: kernel-build
+ variant: scratch
+ shell: /bin/bash
+ dependencies:
++  - stage: cross-toolchain
+   - stage: kernel-prepare
+ steps:
+   - env:
+-      CARCH: {{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}amd64{{ else }}unsupported{{ end }}
+-      ARCH: {{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}x86{{ else }}unsupported{{ end }}
++      CARCH: {{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}{{ if and .BUILD_ARG_CROSS_COMPILE }}arm64{{ else }}amd64{{ end }}{{ else }}unsupported{{ end }}
++      ARCH: {{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}{{ if and .BUILD_ARG_CROSS_COMPILE }}arm64{{ else }}x86{{ end }}{{ else }}unsupported{{ end }}
++      CROSS: {{ if .BUILD_ARG_CROSS_COMPILE }}true{{ end }}
+     prepare:
+       - |
+         cd /src
+@@ -21,31 +23,52 @@ steps:
+     build:
+       {{ if .BUILD_ARG_KERNEL_TARGET }}
+       - |
++        export MAKE_OPTS=(
++        {{ if .BUILD_ARG_CROSS_COMPILE }}
++            ARCH=${ARCH}
++            CROSS_COMPILE=aarch64-linux-musl-
++        )
++        export CROSS_COMPILE=aarch64-linux-musl-
++        export PATH=/opt/cross-toolchain/bin:$PATH
++        {{ else }}
++        )
++        {{ end }}
++
++        ls -la /opt/cross-toolchain
++
+         cd /src
+ 
+-        make {{ .BUILD_ARG_KERNEL_TARGET }}
++        make -j $(nproc) {{ .BUILD_ARG_KERNEL_TARGET }} ${MAKE_OPTS[@]}
+       {{ else }}
+       - |
+         cd /src
+         python3 /toolchain/kernel-hardening-checker/bin/kernel-hardening-checker -c .config -m json | python3 /pkg/scripts/filter-hardened-check.py ${CARCH}
+       - |
++        export MAKE_OPTS=(
++        {{ if .BUILD_ARG_CROSS_COMPILE }}
++            ARCH=${ARCH}
++            CROSS_COMPILE=aarch64-linux-musl-
++        )
++        export CROSS_COMPILE=aarch64-linux-musl-
++        export PATH=/opt/cross-toolchain/bin:$PATH
++        {{ else }}
++        )
++        {{ end }}
++
+         cd /src
+ 
+-        make -j $(nproc)
+-        make -j $(nproc) modules
++        make -j $(nproc) ${MAKE_OPTS[@]}
+ 
+-        if [[ "${ARCH}" == "arm64" ]]; then
++        if [[ "${ARCH}" == "arm64" || -n "${CROSS}" ]]; then
+           echo "Compiling device-tree blobs"
+-          make -j $(nproc) DTC_FLAGS=-@ dtbs
++          make -j $(nproc) DTC_FLAGS=-@ dtbs ${MAKE_OPTS[@]}
+         fi
+       {{ end }}
+ finalize:
+   {{ if .BUILD_ARG_KERNEL_TARGET }}
+   - from: /src/.config
+-    to: config-{{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}amd64{{ else }}unsupported{{ end }}
++    to: config-{{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}{{ if .BUILD_ARG_CROSS_COMPILE }}arm64{{ else }}amd64{{ end }}{{ else }}unsupported{{ end }}
+   {{ else }}
+   - from: /src
+     to: /src
+-  - from: /toolchain
+-    to: /toolchain
+   {{ end }}
+diff --git a/kernel/kernel/pkg.yaml b/kernel/kernel/pkg.yaml
+index 1692dd3..a91057e 100644
+--- a/kernel/kernel/pkg.yaml
++++ b/kernel/kernel/pkg.yaml
+@@ -6,7 +6,7 @@ dependencies:
+   - stage: kernel-build
+ steps:
+   - env:
+-      ARCH: {{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}x86_64{{ else }}unsupported{{ end }}
++      ARCH: {{ if eq .ARCH "aarch64"}}arm64{{ else if eq .ARCH "x86_64" }}{{ if and .BUILD_ARG_CROSS_COMPILE }}arm64{{ else }}x86_64{{ end }}{{ else }}unsupported{{ end }}
+     install:
+       - |
+         cd /src
+-- 
+2.53.0
+

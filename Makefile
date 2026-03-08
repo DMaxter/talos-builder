@@ -2,6 +2,13 @@ PKG_VERSION = v1.11.0
 TALOS_VERSION = v1.11.5
 SBCOVERLAY_VERSION = main
 
+CROSS_COMPILE ?= false
+
+PLATFORM ?= linux/arm64
+ifeq ($(CROSS_COMPILE), true)
+	PLATFORM = linux/amd64
+endif
+
 REGISTRY ?= ghcr.io
 REGISTRY_USERNAME ?= talos-rpi5
 
@@ -75,9 +82,16 @@ kernel:
 	cd "$(CHECKOUTS_DIRECTORY)/pkgs" && \
 		$(MAKE) \
 			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
-			PLATFORM=linux/arm64 \
+			PLATFORM=$(PLATFORM) \
+			CROSS_COMPILE=$(CROSS_COMPILE) \
 			kernel
 
+cross-toolchain:
+	cd "$(CHECKOUTS_DIRECTORY)/pkgs" && \
+		$(MAKE) \
+			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
+			PLATFORM=$(PLATFORM) \
+			cross-toolchain
 
 
 #
@@ -90,7 +104,8 @@ overlay:
 		$(MAKE) \
 			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) IMAGE_TAG=$(SBCOVERLAY_TAG) PUSH=true \
 			PKGS_PREFIX=$(REGISTRY)/$(REGISTRY_USERNAME) PKGS=$(PKGS_TAG) \
-			INSTALLER_ARCH=arm64 PLATFORM=linux/arm64 \
+			INSTALLER_ARCH=arm64 PLATFORM=$(PLATFORM) \
+			CROSS_COMPILE=$(CROSS_COMPILE) \
 			sbc-raspberrypi5
 
 
@@ -100,6 +115,9 @@ overlay:
 #
 .PHONY: installer
 installer:
+	@if [ "$(CROSS_COMPILE)" = "true" ]; then \
+		export DOCKER_DEFAULT_PLATFORM=linux/arm64; \
+	fi; \
 	cd "$(CHECKOUTS_DIRECTORY)/talos" && \
 		$(MAKE) \
 			REGISTRY=$(REGISTRY) USERNAME=$(REGISTRY_USERNAME) PUSH=true \
