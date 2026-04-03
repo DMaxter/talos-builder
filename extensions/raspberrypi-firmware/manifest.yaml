@@ -1,0 +1,4 @@
+version: v1alpha1
+metadata:
+  name: raspberrypi-firmware
+  description: Raspberry Pi WiFi and Bluetooth firmware

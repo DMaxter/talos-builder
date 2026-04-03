@@ -1,0 +1,10 @@
+name: wpa_supplicant
+depends:
+    - configuration: true
+container:
+  entrypoint: /wifi-manager
+restart: always
+security:
+  hostNetwork: true
+  privileged: true
+logToConsole: true
