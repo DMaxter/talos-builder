@@ -1,0 +1,147 @@
+From 503743e0c194841832796cc07389553aec9e255c Mon Sep 17 00:00:00 2001
+From: DMaxter <daniel_matos@outlook.pt>
+Date: Wed, 1 Apr 2026 00:09:35 +0100
+Subject: [PATCH 1/1] feat: cross-compile and wifi extension
+
+---
+ Makefile                                | 6 ++++--
+ artifacts/raspberrypi-firmware/pkg.yaml | 2 --
+ artifacts/u-boot/pkg.yaml               | 2 +-
+ installers/revpi_generic/pkg.yaml       | 8 ++++++++
+ installers/rpi_generic/pkg.yaml         | 8 ++++++++
+ installers/rpi_generic/src/main.go      | 3 ++-
+ 6 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 9b62521..f5cd535 100644
+--- a/Makefile
++++ b/Makefile
+@@ -12,12 +12,13 @@ BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
+ ARTIFACTS := _out
+ IMAGE_TAG ?= $(TAG)$(TAG_SUFFIX)
+ OPERATING_SYSTEM := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+-GOARCH := $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
++GOARCH := arm64
+ REGISTRY ?= ghcr.io
+ USERNAME ?= siderolabs
+ REGISTRY_AND_USERNAME ?= $(REGISTRY)/$(USERNAME)
+ KRES_IMAGE ?= ghcr.io/siderolabs/kres:latest
+ CONFORMANCE_IMAGE ?= ghcr.io/siderolabs/conform:latest
++CROSS_COMPILE ?= false
+ 
+ # source date epoch of first commit
+ 
+@@ -33,7 +34,7 @@ BLDR := docker run --rm --user $(shell id -u):$(shell id -g) --volume $(PWD):/sr
+ # docker build settings
+ 
+ BUILD := docker buildx build
+-PLATFORM ?= linux/amd64,linux/arm64
++PLATFORM ?= linux/amd64
+ PROGRESS ?= auto
+ PUSH ?= false
+ CI_ARGS ?=
+@@ -43,6 +44,7 @@ BUILD_ARGS += --build-arg=PKGS_PREFIX="$(PKGS_PREFIX)"
+ BUILD_ARGS += --build-arg=PKGS="$(PKGS)"
+ BUILD_ARGS += --build-arg=TOOLS_PREFIX="$(TOOLS_PREFIX)"
+ BUILD_ARGS += --build-arg=TOOLS="$(TOOLS)"
++BUILD_ARGS += --build-arg=CROSS_COMPILE="$(CROSS_COMPILE)"
+ COMMON_ARGS = --file=Pkgfile
+ COMMON_ARGS += --provenance=false
+ COMMON_ARGS += --progress=$(PROGRESS)
+diff --git a/artifacts/raspberrypi-firmware/pkg.yaml b/artifacts/raspberrypi-firmware/pkg.yaml
+index b1420bd..83c2b1c 100644
+--- a/artifacts/raspberrypi-firmware/pkg.yaml
++++ b/artifacts/raspberrypi-firmware/pkg.yaml
+@@ -19,8 +19,6 @@ steps:
+         cp -av boot/* /rootfs/artifacts/arm64/firmware/boot
+         # Downstream kernels, not used by Talos boot flow
+         rm /rootfs/artifacts/arm64/firmware/boot/kernel*
+-        # At least now downstream Pi 5 dts are not compatible with mainline
+-        rm /rootfs/artifacts/arm64/firmware/boot/bcm2712*
+ finalize:
+   - from: /rootfs
+     to: /rootfs
+diff --git a/artifacts/u-boot/pkg.yaml b/artifacts/u-boot/pkg.yaml
+index 5c4299e..d97b4ea 100644
+--- a/artifacts/u-boot/pkg.yaml
++++ b/artifacts/u-boot/pkg.yaml
+@@ -15,7 +15,7 @@ steps:
+         sha256: "{{ .uboot_sha256 }}"
+         sha512: "{{ .uboot_sha512 }}"
+     env:
+-      SOURCE_DATE_EPOCH: { { .BUILD_ARG_SOURCE_DATE_EPOCH } }
++      SOURCE_DATE_EPOCH: {{ .BUILD_ARG_SOURCE_DATE_EPOCH }}
+     prepare:
+       - |
+         tar xf u-boot.tar.bz2 --strip-components=1
+diff --git a/installers/revpi_generic/pkg.yaml b/installers/revpi_generic/pkg.yaml
+index 8a4f5d3..84098b0 100644
+--- a/installers/revpi_generic/pkg.yaml
++++ b/installers/revpi_generic/pkg.yaml
+@@ -6,6 +6,10 @@ dependencies:
+ steps:
+   - env:
+       GOPATH: /tmp/go
++      {{ if .BUILD_ARG_CROSS_COMPILE }}
++      GOOS: linux
++      GOARCH: arm64
++      {{ end }}
+     network: default
+     cachePaths:
+       - /.cache/go-build
+@@ -16,6 +20,10 @@ steps:
+         go mod download
+   - env:
+       GOPATH: /tmp/go
++      {{ if .BUILD_ARG_CROSS_COMPILE }}
++      GOOS: linux
++      GOARCH: arm64
++      {{ end }}
+     cachePaths:
+       - /.cache/go-build
+       - /tmp/go/pkg
+diff --git a/installers/rpi_generic/pkg.yaml b/installers/rpi_generic/pkg.yaml
+index 7d753d0..1ca31aa 100644
+--- a/installers/rpi_generic/pkg.yaml
++++ b/installers/rpi_generic/pkg.yaml
+@@ -6,6 +6,10 @@ dependencies:
+ steps:
+   - env:
+       GOPATH: /tmp/go
++      {{ if .BUILD_ARG_CROSS_COMPILE }}
++      GOOS: linux
++      GOARCH: arm64
++      {{ end }}
+     network: default
+     cachePaths:
+       - /.cache/go-build
+@@ -16,6 +20,10 @@ steps:
+         go mod download
+   - env:
+       GOPATH: /tmp/go
++      {{ if .BUILD_ARG_CROSS_COMPILE }}
++      GOOS: linux
++      GOARCH: arm64
++      {{ end }}
+     cachePaths:
+       - /.cache/go-build
+       - /tmp/go/pkg
+diff --git a/installers/rpi_generic/src/main.go b/installers/rpi_generic/src/main.go
+index ecf94ed..094caf2 100644
+--- a/installers/rpi_generic/src/main.go
++++ b/installers/rpi_generic/src/main.go
+@@ -33,9 +33,10 @@ func (i *RpiInstaller) GetOptions(extra rpiOptions) (overlay.Options, error) {
+ 		Name: "rpi_generic",
+ 		KernelArgs: []string{
+ 			"console=tty0",
+-			"console=ttyAMA0,115200",
++			"console=ttyAMA10,115200",
+ 			"sysctl.kernel.kexec_load_disabled=1",
+ 			"talos.dashboard.disabled=1",
++			"net.ifnames=0",
+ 		},
+ 	}, nil
+ }
+-- 
+2.53.0
+

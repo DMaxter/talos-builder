@@ -1,0 +1,65 @@
+From d9dec3b9ab26b2d0b73126cabed233462067e5db Mon Sep 17 00:00:00 2001
+From: DMaxter <daniel_matos@outlook.pt>
+Date: Fri, 24 Apr 2026 20:11:37 +0100
+Subject: [PATCH 1/1] feat: insecure registry
+
+---
+ Makefile | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index e5e5be5d2..99455ed84 100644
+--- a/Makefile
++++ b/Makefile
+@@ -14,6 +14,8 @@ BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
+ REGISTRY_AND_USERNAME := $(IMAGE_REGISTRY)/$(USERNAME)
+ NAME = Talos
+ 
++CRANE_ARGS = --insecure
++
+ CLOUD_IMAGES_EXTRA_ARGS ?= ""
+ ZSTD_COMPRESSION_LEVEL ?= 18
+ 
+@@ -493,10 +495,10 @@ IMAGES_LIST :=
+ installer: ## Builds the installer and outputs it to the artifact directory.
+ 	@$(MAKE) image-installer IMAGER_ARGS="--base-installer-image $(REGISTRY_AND_USERNAME)/installer-base:$(IMAGE_TAG_IN) $(IMAGER_ARGS)"
+ 
+-	@crane_args=""
++	@crane_args="$(CRANE_ARGS)"
+ 	@for platform in $(subst $(,),$(space),$(PLATFORM)); do \
+ 		arch=$$(basename "$${platform}") && \
+-		image=$$(crane push $(ARTIFACTS)/installer-$${arch}.tar $(REGISTRY_AND_USERNAME)/installer:$(IMAGE_TAG_OUT)-$${arch}) && \
++		image=$$(crane push $(ARTIFACTS)/installer-$${arch}.tar $(REGISTRY_AND_USERNAME)/installer:$(IMAGE_TAG_OUT)-$${arch} $(CRANE_ARGS)) && \
+ 		crane_args="$${crane_args} -m $${image}" && \
+ 		rm -f $(ARTIFACTS)/installer-$${arch}.tar ; \
+ 	done; \
+@@ -508,7 +510,7 @@ secureboot-installer: ## Builds UEFI only installer which uses UKI and push it t
+ 	@$(MAKE) image-secureboot-installer IMAGER_ARGS="--base-installer-image $(REGISTRY_AND_USERNAME)/installer-base:$(IMAGE_TAG_IN) $(IMAGER_ARGS)"
+ 	@for platform in $(subst $(,),$(space),$(PLATFORM)); do \
+ 		arch=$$(basename "$${platform}") && \
+-		crane push $(ARTIFACTS)/installer-$${arch}-secureboot.tar $(REGISTRY_AND_USERNAME)/installer:$(IMAGE_TAG_OUT)-$${arch}-secureboot && \
++		crane push $(ARTIFACTS)/installer-$${arch}-secureboot.tar $(REGISTRY_AND_USERNAME)/installer:$(IMAGE_TAG_OUT)-$${arch}-secureboot $(CRANE_ARGS) && \
+ 		rm -f $(ARTIFACTS)/installer-$${arch}-secureboot.tar ; \
+ 	done
+ 
+@@ -541,7 +543,7 @@ cache-create: installer imager ## Generate image cache.
+ 	@docker run --entrypoint /usr/local/bin/e2e.test registry.k8s.io/conformance:$(KUBECTL_VERSION) --list-images | \
+ 		$(TALOSCTL_EXECUTABLE) images integration --installer-tag=$(IMAGE_TAG_IN) --registry-and-user=$(REGISTRY_AND_USERNAME) | \
+ 		$(TALOSCTL_EXECUTABLE) images cache-create --image-cache-path=/tmp/cache.tar --images=- --force
+-	@crane push /tmp/cache.tar $(REGISTRY_AND_USERNAME)/image-cache:$(IMAGE_TAG_OUT)
++	@crane push /tmp/cache.tar $(REGISTRY_AND_USERNAME)/image-cache:$(IMAGE_TAG_OUT) $(CRANE_ARGS)
+ 	@$(MAKE) image-iso IMAGER_ARGS="--image-cache=$(REGISTRY_AND_USERNAME)/image-cache:$(IMAGE_TAG_OUT) --extra-kernel-arg='console=ttyS0'"
+ 
+ # Code Quality
+@@ -654,7 +656,7 @@ provision-tests-track-%:
+ installer-with-extensions: $(ARTIFACTS)/extensions/_out/extensions-metadata
+ 	$(MAKE) image-installer \
+ 		IMAGER_ARGS="--base-installer-image=$(REGISTRY_AND_USERNAME)/installer-base:$(IMAGE_TAG_IN) $(shell cat $(ARTIFACTS)/extensions/_out/extensions-metadata | $(EXTENSIONS_FILTER_COMMAND) | xargs -n 1 echo --system-extension-image)"
+-	crane push $(ARTIFACTS)/installer-amd64.tar $(REGISTRY_AND_USERNAME)/installer:$(IMAGE_TAG_OUT)-amd64-extensions
++	crane push $(ARTIFACTS)/installer-amd64.tar $(REGISTRY_AND_USERNAME)/installer:$(IMAGE_TAG_OUT)-amd64-extensions $(CRANE_ARGS)
+ 	INSTALLER_IMAGE_EXTENSIONS="$(REGISTRY_AND_USERNAME)/installer:$(IMAGE_TAG_OUT)-amd64-extensions" yq eval -n '.machine.install.image = strenv(INSTALLER_IMAGE_EXTENSIONS)' > $(ARTIFACTS)/installer-extensions-patch.yaml
+ 
+ kubelet-fat-patch:
+-- 
+2.53.0
+
