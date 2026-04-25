@@ -9,6 +9,7 @@ So far, this release has been verified on:
 | Raspberry Pi Compute Module 5 on Compute Module 5 IO Board |
 | Raspberry Pi Compute Module 5 Lite on [DeskPi Super6C](https://wiki.deskpi.com/super6c/) |
 | Raspberry Pi 5b with [RS-P11 for RS-P22 RPi5](https://wiki.52pi.com/index.php?title=EP-0234) |
+| Raspberry Pi 5 |
 
 ## What's not working?
 * Booting from USB: USB is only available once LINUX has booted up but not in U-Boot.
@@ -58,6 +59,27 @@ If it isn't enabled, please run
 ```bash
 docker run --privileged --rm tonistiigi/binfmt --install all
 ```
+
+### Wifi
+
+By default the wifi extension is included, but it can be removed if not needed, by removing it from the Makefile.
+
+The wifi configuration is provided with `talosctl apply-config` with a patch looking like the following:
+
+```bash
+apiVersion: v1alpha1
+kind: ExtensionServiceConfig
+name: wpa_supplicant
+configFiles:
+    - content: |
+        country=<YOUR CONTRY CODE>
+        network={
+          ssid=<YOUR NETWORK SSID>
+          psk="<YOUR NETWORK PASSPHRASE">
+        }
+      mountPath: /etc/wpa_supplicant.conf
+```
+
 
 ## License
 See [LICENSE](LICENSE).
